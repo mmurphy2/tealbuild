@@ -1,0 +1,18 @@
+# tealbuild include file for {{ name }}
+#
+# If preliminary steps (e.g. user creation) are needed before running the
+# SlackBuild, those commands can be put here. Be careful to make commands
+# idempotent in case the build needs to be repeated in the same VM session.
+# For example, the following creates the "chrony" user for building the chrony
+# package from SlackBuilds.org:
+#
+# if ! id chrony >/dev/null 2>&1; then
+#     groupadd -g 354 chrony
+#     useradd -u 354 -d /var/lib/chrony -s /bin/false -g chrony chrony
+# fi
+#
+# For SlackBuild scripts that build optional features based on environment
+# variable settings, simply set the environment variable in this script:
+#
+# FOO=bar
+#

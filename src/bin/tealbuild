@@ -1,0 +1,224 @@
+#!/bin/bash
+#
+# TealBuild - A package build and repository manager for Slackware Linux
+#
+# Copyright 2021 Coastal Carolina University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+#
+
+
+_TEALBUILD_VERSION="0.8.9"
+_SELF=$(readlink -e "$0")
+_SELF_EXE=$(basename "${_SELF}")
+_BINDIR=$(dirname "${_SELF}")
+_PREFIX=$(dirname "${_BINDIR}")
+_LIBDIR="${_PREFIX}/lib/tealbuild"
+_MANDIR="${_PREFIX}/man"
+_SHARE="${_PREFIX}/share/tealbuild"
+_SYSCONFDIR="/etc/tealbuild"
+_USERCONFDIR="${HOME}/.config/tealbuild"
+
+
+# Load all library functions
+for script in "${_LIBDIR}"/*.bash; do
+    [[ -f "${script}" ]] && . "${script}"
+done
+
+# Load all command functions
+for script in "${_LIBDIR}/commands"/*.bash; do
+    [[ -f "${script}" ]] && . "${script}"
+done
+
+
+#######################################################################################################################
+#                                                       DEFAULTS                                                      #
+#######################################################################################################################
+
+
+# Find the configuration file location (if TEALBUILD_ROOT is unset). Walk up the directory hierarchy, looking for a
+# readable tealbuild.conf, and set the root to that location. System-wide, user-level, and build tree configurations
+# can all override these defaults.
+if [[ -z "${TEALBUILD_ROOT}" ]]; then
+    TEALBUILD_ROOT="$(pwd)"
+    while [[ "${TEALBUILD_ROOT}" != "/" && ! -r "${TEALBUILD_ROOT}/tealbuild.conf" && \
+             ! -f "${TEALBUILD_ROOT}/tealbuild.conf" ]]; do
+        TEALBUILD_ROOT=$(dirname "${TEALBUILD_ROOT}")
+    done
+
+    # No sane person would put a tealbuild.conf in /
+    [[ "${TEALBUILD_ROOT}" == "/" ]] && TEALBUILD_ROOT="${HOME}/tealbuild"
+fi
+
+
+GPG=/usr/bin/gpg2
+TEALBUILD_VM="${TEALBUILD_ROOT}/buildvm"
+GPG_HOME="${TEALBUILD_ROOT}/gpg"
+PORTS="${TEALBUILD_ROOT}/ports"
+SOURCES="${TEALBUILD_ROOT}/sources"
+STAGE="${TEALBUILD_ROOT}/stage"
+REPO="${TEALBUILD_ROOT}/repo"
+ARCHIVE="${TEALBUILD_ROOT}/archive"
+TRASH="${TEALBUILD_ROOT}/trash"
+SLACKWARE="${TEALBUILD_ROOT}/slackware"
+SLACKWARE_UPSTREAM="rsync://mirrors.kernel.org/slackware/"
+SBO="${TEALBUILD_ROOT}/slackbuilds.org"
+PACKAGER_NAME="$(whoami)"
+COPYRIGHT_OWNER="${PACKAGER_NAME}"
+PACKAGER_EMAIL="$(whoami)@${HOSTNAME}"
+ARCH="$(uname -m)"
+TAG="_TB"
+PKGTYPE="txz"
+TEALBUILD_PAGER=${TEALBUILD_PAGER:-"less -c"}
+VM_IMAGE="${TEALBUILD_VM}/vm-${ARCH}.qcow2"
+VM_IMAGE_FORMAT="qcow2"
+VM_IMAGE_SIZE="80G"
+VM_DISK_TYPE="ide"
+VM_SYSTEM="pc-q35-6.0"
+VM_CPU="host"
+VM_CPU_COUNT=1
+VM_CPU_CORES_PER_CPU=$(profile_cpu)
+VM_CPU_THREADS_PER_CORE=1
+VM_ACCEL="kvm"
+VM_RAM=$(profile_ram)
+VM_MAC="02:00:00:00:00:01"
+VM_NIC_MODEL="virtio-net-pci"
+VM_VGA="virtio"
+VM_DISPLAY="gtk"
+VM_MONITOR_PORT=7142
+NCAT_OPTIONS=""
+VM_SSH_PORT=7722
+SSH_ROOT_KEY="${TEALBUILD_VM}/id_rsa"
+VM_EXTRA_SETTINGS=""
+AUTOSTART_VM="yes"
+AUTOSTART_VM_TIMEOUT=300
+AUTOSTOP_VM="never"
+REPO_REMOTE_PATH=""
+REPO_SSH_HOST=""
+REPO_SSH_PORT=22
+REPO_SSH_USER=""
+REPO_SERVER_ADDRESS="127.0.0.1"
+REPO_SERVER_PORT=8018
+
+
+#######################################################################################################################
+#                                                         MAIN                                                        #
+#######################################################################################################################
+
+
+# Load any system-wide settings first
+if [[ -f "${_SYSCONFDIR}/tealbuild.conf" ]]; then
+    . "${_SYSCONFDIR}/tealbuild.conf"
+fi
+
+# Any system-wide additions or overrides are loaded next
+if [[ -d "${_SYSCONFDIR}/extensions" ]]; then
+    for script in "${_SYSCONFDIR}/extensions"/*.bash; do
+        [[ -f "${script}" ]] && . "${script}"
+    done
+fi
+
+# Load any user configuration next
+if [[ -f "${_USERCONFDIR}/tealbuild.conf" ]]; then
+    . "${_USERCONFDIR}/tealbuild.conf"
+fi
+
+# Load user-level extensions or overrides
+if [[ -d "${_USERCONFDIR}/extensions" ]]; then
+    for script in "${_USERCONFDIR}/extensions"/*.bash; do
+        [[ -f "${script}" ]] && . "${script}"
+    done
+fi
+
+# Now load the build tree configuration, and note its location on stderr if not doing Bash completion
+if [[ -f "${TEALBUILD_ROOT}/tealbuild.conf" ]]; then
+    if [[ "$1" != "complete" ]]; then
+        echo "--[ Loading configuration from ${TEALBUILD_ROOT}/tealbuild.conf ]" >&2
+        echo >&2
+    fi
+    . "${TEALBUILD_ROOT}/tealbuild.conf"
+else
+    if [[ "$1" != "complete" ]]; then
+        echo "--[ Using ${TEALBUILD_ROOT} as the default build tree ]" >&2
+        echo >&2
+    fi
+fi
+
+# Load any extensions found inside the build tree extensions directory.
+if [[ -d "${TEALBUILD_ROOT}/extensions" ]]; then
+    for script in "${TEALBUILD_ROOT}/extensions/"*.bash; do
+        [[ -f "${script}" ]] && . "${script}"
+    done
+fi
+
+#############################################################################
+
+# Allow variables to be overridden on the command line with --varname VALUE. Variables are specified in lowercase,
+# then the names are converted to uppercase for the assignment. The special --help shows the help message instead.
+
+action="$1"
+
+if [[ "${action}" == "--help" ]]; then
+    show_help
+    exit 0
+fi
+
+while [[ "${action:0:2}" == "--" ]]; do
+    shift
+    if [[ "${action}" != "--" ]]; then
+        var=$(echo "${action:2}" | sed 's/-/_/g')
+        if echo "${var}" | grep -q '^[A-Za-z_][A-Za-z0-9_]*$'; then
+            eval ${var^^}=$1
+            shift
+        else
+            echo "Invalid option: ${action}" >&2
+            exit 2
+        fi
+    fi
+done
+
+#############################################################################
+
+# All commands in TealBuild are implemented as functions that start with cmd_ and use underscores in place of dashes.
+action=$(echo "cmd_$1" | sed 's/-/_/g')
+shift
+
+final_status=0
+
+if [[ "$(LC_ALL=C type -t ${action} 2>/dev/null)" == "function" ]]; then
+    # If the user has given a command that corresponds to a valid function, run the function with remaining script args
+    "${action}" "$@"
+    final_status=$?
+else
+    # No function matches the transformation of the command the user provided
+    base=$(basename "$0")
+    if [[ -n "${action##cmd_}" ]]; then
+        echo -n "Unknown command: " >&2
+        echo "${action:4}" | sed 's/_/-/g' >&2
+        echo >&2
+        echo "For help, run ${base} --help" >&2
+    else
+        echo "Usage: ${base} <command> [arguments]" >&2
+        echo >&2
+        echo "For help, run ${base} --help" >&2
+    fi
+    final_status=2
+fi
+
+exit ${final_status}

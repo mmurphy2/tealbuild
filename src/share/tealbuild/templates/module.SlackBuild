@@ -1,0 +1,206 @@
+#!/bin/bash
+#
+# Slackware build script for {{ name }}
+#
+# This build is for an Environment Module (modules.sourceforge.net), which
+# uses different build settings compared to a standard SlackBuild script.
+#
+# Copyright {{ year }} {{ COPYRIGHT_OWNER }}
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+# Site-specific configuration for the location of the software modules tree and the modulefiles that allow
+# Environment Modules to load the software modules. This location is the Coastal Carolina University HPC
+# location, which in turn copies The Pennsylvania State University (/usr/global).
+INSTALL_TOP=${INSTALL_TOP:-/usr/global}
+MODULE_FILES=${MODULE_FILES:-/usr/global/modules}
+
+# The LOAD_MODULES array lists modules that need to be loaded for the build to be successful. These modules
+# are then also needed at runtime, as dependencies of the modulefile we will generate.
+LOAD_MODULES=( )
+
+# Short note (inside parentheses, by convention) giving some brief information about this module
+MODULE_NOTE="()"
+
+# PRGNAM sets the name of the Slackware package
+PRGNAM={{ name }}
+VERSION=${VERSION:-6.2.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-{{ TAG }}}
+
+# MODNAM is the short name of the module
+MODNAM=gcc
+
+# MODTAG is the compiler and/or platform tag of the module
+MODTAG=haswell
+
+# SRCNAM is the name of the extracted source directory
+SRCNAM=$MODNAM-$VERSION
+
+# MODPATH sets the directory structure
+MODPATH=$MODNAME/$MODTAG/$VERSION
+
+
+# HPC software is normally tuned for the platform on which it will run. Also, we don't use LIBDIRSUFFIX here, since
+# the libraries won't be integrated into the normal library path.
+ARCH=x86_64
+SLKCFLAGS="-O2 -fPIC"
+
+
+# Documentation files found inside the source package (adjust as needed)
+DOCUMENTATION="README.md LICENSE"
+
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/tealbuild/build}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp/tealbuild/output}
+
+set -e
+
+rm -rf $PKG
+mkdir -p $TMP $PKG $OUTPUT
+cd $TMP
+rm -rf $SRCNAM-$VERSION
+tar xvf $CWD/$SRCNAM-$VERSION.tar.gz
+cd $SRCNAM-$VERSION
+chown -R root:root .
+find -L . \
+ \( -perm 777 -o -perm 775 -o -perm 750 -o -perm 711 -o -perm 555 \
+  -o -perm 511 \) -exec chmod 755 {} \; -o \
+ \( -perm 666 -o -perm 664 -o -perm 640 -o -perm 600 -o -perm 444 \
+  -o -perm 440 -o -perm 400 \) -exec chmod 644 {} \;
+
+
+# Root doesn't normally have the module command on the PATH: add it
+. /etc/profile.d/module.sh
+
+# Load any specified modules
+for module in "${LOAD_MODULES[@]}"; do
+    module load "${module}"
+done
+
+
+# If the upstream sources use Autotools, use this section.
+CFLAGS="$SLKCFLAGS" \
+CXXFLAGS="$SLKCFLAGS" \
+./configure \
+  --prefix="$INSTALL_TOP/$MODPATH" \
+  --mandir="$INSTALL_TOP/$MODPATH/man" \
+  --docdir="$INSTALL_TOP/$MODPATH/doc" \
+  --disable-static \
+  --build=$ARCH-slackware-linux
+
+make
+make install DESTDIR=$PKG
+
+
+# If the upstream sources use CMake, use this section
+mkdir -p build
+cd build
+  cmake \
+    -DCMAKE_C_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_CXX_FLAGS:STRING="$SLKCFLAGS" \
+    -DCMAKE_INSTALL_PREFIX="$INSTALL_TOP/$MODPATH" \
+    -DMAN_INSTALL_DIR="$INSTALL_TOP/$MODPATH/man" \
+    -DCMAKE_BUILD_TYPE=Release ..
+  make
+  make install DESTDIR=$PKG
+cd ..
+
+
+# For Python packages using setuptools or distutils
+python3 setup.py install --prefix="$INSTALL_TOP/$MODPATH" --root=$PKG
+
+
+# Strip binaries
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF \
+  | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Compress man pages
+find $PKG/$INSTALL_TOP/$MODPATH/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/$INSTALL_TOP/$MODPATH/man -type l ) ; do ln -s $( readlink $i ).gz $i.gz ; rm $i ; done
+
+# Compress info pages and remove the package's dir file
+# If no info pages are installed by the software, don't leave this in the script
+rm -f $PKG/$INSTALL_TOP/$MODPATH/info/dir
+gzip -9 $PKG/$INSTALL_TOP/$MODPATH/info/*.info*
+
+# Remove perllocal.pod and other special files that don't need to be installed,
+# as they will overwrite what's already on the system.  If this is not needed,
+# remove it from the script.
+# Remove 'special' files
+find $PKG -name perllocal.pod \
+  -o -name ".packlist" \
+  -o -name "*.bs" \
+  | xargs rm -f
+
+
+# Create the modulefile
+mkdir $(dirname "$PKG/$MODULE_FILES/$MODPATH")
+cat > $PKG/$MODULE_FILES/$MODPATH << EOF
+#%Module1.0#####################################################################
+##
+##
+##
+proc ModulesHelp { } {
+        global version
+
+        puts stderr "\tAdds the necessary environment variables to use"
+        puts stderr "\t$MODNAME version $VERSION"
+        puts stderr "\n\tVersion \$version\n"
+        InfoOut
+}
+
+# for Tcl script use only
+set     version     3.2.9
+
+module-whatis   "$MODULE_NOTE"
+
+set             root                    $INSTALL_TOP/$MODPATH
+prepend-path    PATH                    \$root/bin
+prepend-path    LD_LIBRARY_PATH         \$root/lib64
+prepend-path    LIBRARY_PATH            \$root/lib64
+prepend-path    C_INCLUDE_PATH          \$root/include
+prepend-path    CPLUS_INCLUDE_PATH      \$root/include
+prepend-path    INFOPATH                \$root/info
+prepend-path    MANPATH                 \$root/man
+prepend-path    PKG_CONFIG_PATH         \$root/lib64/pkgconfig
+EOF
+
+# Append any loaded modules to the bottom of the modulefile
+for module in "${LOAD_MODULES[@]}"; do
+    echo "module      load          ${module}" >> $PKG/$MODULE_FILES/$MODPATH
+    echo "prereq      ${module}" >> $PKG/$MODULE_FILES/$MODPATH
+done
+
+mkdir -p $PKG/$MODULE_TOP/$MODPATH/doc/$PRGNAM-$VERSION
+cp -a $DOCUMENTATION $PKG/$MODULE_TOP/$MODPATH/doc/$PRGNAM-$VERSION
+cat $CWD/$PRGNAM.SlackBuild > $PKG/$MODULE_TOP/$MODPATH/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild
+
+mkdir -p $PKG/install
+cat $CWD/slack-desc > $PKG/install/slack-desc
+
+if [ -f $CWD/doinst.sh ]; then
+    cat $CWD/doinst.sh > $PKG/install/doinst.sh
+fi
+
+cd $PKG
+/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.${PKGTYPE:-{{ PKGTYPE }}}
