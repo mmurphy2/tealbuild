@@ -1,8 +1,8 @@
 # tealbuild
 Bash and QEMU-based build system for Slackware Linux (abandoned)
 
-Please note that this project has been ABANDONED. The code is provided here under an MIT license, and it is available for
-anyone who would like to use it (or parts of it) in their own build systems.
+Please note that this project has been ABANDONED in favor of a re-write that will be integrated into the
+new [TealPkg](https://github.com/mmurphy2/tealpkg) project.
 
 
 ## About this Code
